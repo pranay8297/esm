@@ -17,6 +17,11 @@ model = ESM.from_pretrained(LoRAConfig(lora_r = 32, lora_key = True, lora_mlp = 
 # Load the pre trained model if you have any
 # model = torch.load('model_finetune_v1.pt')
 
+use_bfloat_16 = False
+gpu_details = torch.cuda.get_device_name(0)
+if 'A100' in gpu_details or 'A6000' in gpu_details: # bfloat16 is available only in Ampere series
+    use_bfloat_16 = True
+
 data_obj = get_dls()
 train_dl = data_obj['train_dl']
 valid_dl = data_obj['valid_dl']
@@ -64,9 +69,12 @@ for i in range(epochs):
         progress = iter/len(train_dl)
         if progress < skip_step_percentage: continue # ensures that it does not train on data it already trained on
 
-        with torch.autocast(device_type='cuda', dtype = torch.bfloat16): # if using an Ampere series GPU else use float32 - Ideally work on A100
+        if use_bfloat_16:
+            with torch.autocast(device_type='cuda', dtype = torch.bfloat16): # if using an Ampere series GPU else use float32 - Ideally work on A100
+                outputs = model(batch['input_ids'].to(device), y = batch['labels'].to(device), attention_mask = batch['attention_mask'].to(device))
+        else: # Else do the training using fp32 precision only
             outputs = model(batch['input_ids'].to(device), y = batch['labels'].to(device), attention_mask = batch['attention_mask'].to(device))
-
+        
         total_tokens_trained += batch['attention_mask'].sum()
 
         losses.append(outputs['loss'].item())
