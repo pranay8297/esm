@@ -82,7 +82,6 @@ for i in range(epochs):
         outputs['loss'].backward()
         # scaler.scale(outputs['loss']).backward()
         steps_processed_after_gradstep += 1
-        losses.append(outputs['loss'].item())
 
         if steps_processed_after_gradstep == grad_accum_steps:
             # Do a backward pass and optimizer step

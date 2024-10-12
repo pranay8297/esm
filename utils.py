@@ -26,10 +26,9 @@ class ProtDS(Dataset):
     
     def __getitem__(self, idx):
         seq = self.sequences[idx]
-        if len(seq) > self.max_len:
-            seq = seq[:self.max_len]
+        if len(seq) >= self.max_len - 1:
+            seq = seq[:self.max_len - 1]
         label = seq[1:] + self.eos_token
-        
         return seq, label
 
 def seq_collate_fn(data: list) -> dict:
