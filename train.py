@@ -5,7 +5,9 @@ from torch.optim import AdamW
 
 from esm_model import *
 from utils import *
+from settings import *
 
+wandb.login(key = WandB_API_KEY)
 run = wandb.init(
     project = 'esm_run_1', 
 )
@@ -13,8 +15,7 @@ run = wandb.init(
 model = ESM.from_pretrained(LoRAConfig(lora_r = 32, lora_key = True, lora_mlp = True, lora_projection = True, lora_alpha = 16), 'esm2_t30_150M_UR50D')
 
 # Load the pre trained model if you have any
-
-#model = torch.load('model_finetune_v1.pt')
+# model = torch.load('model_finetune_v1.pt')
 
 data_obj = get_dls()
 train_dl = data_obj['train_dl']
@@ -88,7 +89,7 @@ for i in range(epochs):
             print(f"Train Progress: {progress*100:.6f}%, train loss: {losses[-1]:.6f}, norm: {norm:.4f}")
             c += 1
             save_counter += 1
-            wandb.log({"train_loss": np.mean(losses[-grad_accum_steps:]), "progress": progress*100:.4f})
+            wandb.log({"train_loss": np.mean(losses[-grad_accum_steps:]), "progress": progress*100})
 
         if c >= 5: # approximately for every 400k tokens trained on, lets calculate the validation loss
             c = 0
