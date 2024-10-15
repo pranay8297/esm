@@ -148,9 +148,7 @@ class ESMEncoder(nn.Module):
 
     def __init__(self, config, lora_config):
         super().__init__() 
-        
         # No activation functions here as well
-
         self.layer = nn.ModuleList([ESMLayers(config, lora_config) for _ in range(config.n_layer)])
         self.emb_layer_norm_after = nn.LayerNorm(config.n_embd)
     
@@ -158,7 +156,6 @@ class ESMEncoder(nn.Module):
 
         for layer in self.layer:
             x = layer(x, attention_mask)
-
         return self.emb_layer_norm_after(x)
 
 class ESM(nn.Module):

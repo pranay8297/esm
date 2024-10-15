@@ -1,10 +1,8 @@
 import torch
-
 from datasets import load_dataset
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer
-
 from esm_embeddings import PFGPT_HF_MODEL_PATH
 
 def get_tokenizer():
@@ -46,15 +44,41 @@ def seq_collate_fn(data: list) -> dict:
 
     return padded_train_tokenized
 
-def get_dls(batch_size: int = 2) -> dict:
+def get_dls(batch_size: int = 2, ddp_args: dict = {}) -> dict:
+
     ds = load_dataset("lamm-mit/GPTProteinPretrained")
     sequences = ds['train']['text'] # list
-    train_seqs, valid_seqs = train_test_split(sequences, test_size = 0.1, shuffle = True)
-    train_ds = ProtDS(train_seqs); valid_ds = ProtDS(valid_seqs)
-    train_dl = DataLoader(train_ds, batch_size = batch_size, collate_fn = seq_collate_fn)
-    valid_dl = DataLoader(valid_ds, batch_size = batch_size, collate_fn = seq_collate_fn)
+    if not getattr(ddp_args, 'is_ddp', False):
+        
+        train_seqs, valid_seqs = train_test_split(sequences, test_size = 0.1, shuffle = True)
+        train_ds = ProtDS(train_seqs); valid_ds = ProtDS(valid_seqs)
+        train_dl = DataLoader(train_ds, batch_size = batch_size, collate_fn = seq_collate_fn)
+        valid_dl = DataLoader(valid_ds, batch_size = batch_size, collate_fn = seq_collate_fn)
 
-    return {"train_ds": train_ds, 
-            "valid_ds": valid_ds, 
-            "train_dl": train_dl, 
-            "valid_dl": valid_dl}
+        return {"train_ds": train_ds, 
+                "valid_ds": valid_ds, 
+                "train_dl": train_dl, 
+                "valid_dl": valid_dl}
+
+    else: 
+        # This is being run on DDP
+        # Divide dataset into ddp_word_size equal parts
+        # create dataset for each ddp process and return dataloaders for each respecitve process
+        n_processes = getattr(ddp_args, 'ddp_world_size', 1)
+        ddp_rank = getattr(ddp_args, 'ddp_rank', 0)
+        # trim off extra sequences from the dataset so as to maintain equal number of batches across processes
+        k, m = divmod(len(sequences), n_processes)
+        # k is the qutoient, m is the remainder
+        sequences = sequences[:-m]
+        splits = [sequences[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(n_processes)]
+        this_sequences = splits[ddp_rank]
+
+        train_seqs, valid_seqs = train_test_split(this_sequences, test_size = 0.1, shuffle = True)
+        train_ds = ProtDS(train_seqs); valid_ds = ProtDS(valid_seqs)
+        train_dl = DataLoader(train_ds, batch_size = batch_size, collate_fn = seq_collate_fn)
+        valid_dl = DataLoader(valid_ds, batch_size = batch_size, collate_fn = seq_collate_fn)
+
+        return {"train_ds": train_ds, 
+                "valid_ds": valid_ds, 
+                "train_dl": train_dl, 
+                "valid_dl": valid_dl}
