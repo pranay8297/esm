@@ -8,18 +8,18 @@ from esm_model import *
 from utils import *
 from settings import *
 
-from torch.distributed import init_process_group, destroy_process_group
+from torch.distributed import init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.distributed as dist
 
 torch.manual_seed(22) # Signature Number
 if torch.cuda.is_available():
     torch.cuda.manual_seed(22)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # DDP
-ddp = int(os.environ.get('RANK', -1)) != -1
+ddp = torch.cuda.device_count() > 1
 ddp_args = {}
+
 if ddp:
     # use of DDP atm demands CUDA, we set the device appropriately according to rank
     assert torch.cuda.is_available(), "for now i think we need CUDA for DDP"
@@ -27,7 +27,7 @@ if ddp:
     ddp_rank = int(os.environ['RANK'])
     ddp_local_rank = int(os.environ['LOCAL_RANK'])
     ddp_world_size = int(os.environ['WORLD_SIZE'])
-    device = f'cuda:{ddp_local_rank}'
+    device = torch.device(f'cuda:{ddp_local_rank}')
     torch.cuda.set_device(device)
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.
     ddp_args = {'ddp_world_size': ddp_world_size, 'ddp_rank': ddp_rank, 'is_ddp': True}
@@ -35,7 +35,7 @@ else:
     ddp_rank = 0
     ddp_local_rank = 0
     ddp_world_size = 1
-    device = f'cuda:{ddp_local_rank}'
+    device = torch.device(f'cuda:{ddp_local_rank}') if torch.cuda.is_available() else torch.device('cpu') 
     if torch.cuda.is_available():
         torch.cuda.set_device(device)
     master_process = ddp_rank == 0 # this process will do logging, checkpointing etc.    
@@ -67,11 +67,11 @@ valid_dl = data_obj['valid_dl']
 # Model 
 torch.set_float32_matmul_precision('high')
 # Model should be created on all the processes
-model = ESM.from_pretrained(LoRAConfig(lora_r = 64, lora_key = True, lora_mlp = True, lora_projection = True, lora_alpha = 64), 'esm2_t30_150M_UR50D')
+model = ESM.from_pretrained(LoRAConfig(lora_r = 32, lora_key = True, lora_mlp = True, lora_projection = True, lora_alpha = 16), 'esm2_t30_150M_UR50D')
 
 # Load the pre trained model if you have any
 # model = torch.load('model_finetune_v1.pt')
-
+model = model.to(device)
 model = torch.compile(model)
 if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
@@ -88,13 +88,13 @@ vl_losses_track = {0: -np.log(1/384)} # Ideal loss at epoch 0 before any finetun
 vl_losses_all = []
 
 starting_lr = 1e-05
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 opt = AdamW(model.parameters(), lr = starting_lr, betas = (0.9, 0.95), eps = 1e-08)
 # Use cosine anneling learning rate because the model is partially finetuned for this task and warmup phase is over
 # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, iterations) 
 
 # Use this if you are finetuning from direct ESM model else use Cosine Anneling LRS
-lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr = 1e-05, total_steps = iterations, final_div_factor=10.0) 
+lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr = 3e-04, total_steps = iterations, final_div_factor=10.0)
 skip_step_percentage = 0.0#91068
 
 # Saving related stuff
@@ -138,7 +138,6 @@ for i in range(epochs):
                 vl_losses_track[total_tokens_trained.item()] = np.mean(vl_losses)
                 print(f"valid loss: {vl_losses_all[-1]:.6f}")
                 wandb.log({"valid_loss": np.mean(vl_losses)})
-            
 
         if master_process and save_counter >= save_after_every:
             # saves the checkpoint for every 1000 grad updates
