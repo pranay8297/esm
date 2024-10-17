@@ -181,11 +181,11 @@ class ESM(nn.Module):
 
         '''
         name                n_layers    n_params  
-        esm2_t48_15B_UR50D	48	        15B
-        esm2_t36_3B_UR50D	36	        3B
-        esm2_t33_650M_UR50D	33	        650M
-        esm2_t30_150M_UR50D	30	        150M
-        esm2_t12_35M_UR50D	12	        35M
+        esm2_t48_15B_UR50D  48          15B
+        esm2_t36_3B_UR50D   36          3B
+        esm2_t33_650M_UR50D 33          650M
+        esm2_t30_150M_UR50D 30          150M
+        esm2_t12_35M_UR50D  12          35M
         esm2_t6_8M_UR50D
         '''
 
@@ -281,10 +281,8 @@ class ESM(nn.Module):
 
         # Calculate Embeddings
         x = self.esm.embeddings(x, attention_mask) # TODO: Verify the new embeddings function without doing post init and after doing post model init - Ideally both should stay the same
-
         # compute attention_mask for attention scores
         extended_attention_mask = self.get_extended_attn_mask(attention_mask, x.shape)
-
         #Do the forward pass
         x = self.esm.encoder(x, attention_mask = extended_attention_mask)
         logits = self.esm.final_layer(x)
@@ -314,3 +312,27 @@ class ESM(nn.Module):
             output['loss'] = actual_loss
 
         return output
+    
+    def configure_optimizers(self, learning_rate, weight_decay = 1e-02):
+        
+        # start with all of the candidate parameters (that require grad)
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        
+        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
+        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2 and 'lora' not in n]
+        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2 or 'lora' in n]
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nodecay_params, 'weight_decay': 0.0}
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        # Create AdamW optimizer and use the fused version if it is available
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=True)
+        return optimizer

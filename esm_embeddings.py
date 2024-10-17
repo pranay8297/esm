@@ -56,6 +56,10 @@ class ESMEmbeddings(nn.Module):
 
     def forward(self, x, attention_mask = None):
         token_embs = self.word_embeddings(x)
+        position_embs = self.position_embeddings
+        pos = torch.arange(0, x.shape[1], dtype=torch.long, device=idx.device) # shape (T)
+        pos_emb = self.position_embeddings(pos)
+        token_embs = token_embs + pos_emb
         # Not required as we are use rotary embeddings - Hence we do not require absolute position embeddings
         # position_embs = self.esm.embeddings.position_embeddings(torch.arange(0, x.shape[1], 1, dtype = torch.long)) 
         if attention_mask is not None: 
